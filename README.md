@@ -17,15 +17,39 @@ image instead of changing ARGUS itself.
   CDeep3M2's pipeline with ncnn prediction (CPU or Vulkan GPU) and a PyTorch trainer
 - PyTorch: CPU build, or CUDA 11.8 (NVIDIA GPUs from the GTX 10 series to the RTX 40 series)
 - the ncnn conversion tools and the CDeep3M Caffe fork's `caffe.proto`
+- the **`cdeep3m` skill** (`skills/cdeep3m/`), so the agent can do the work from plain-English requests
 
 No model weights or data are in the image. Adding CDeep3M only adds Python packages; it changes
 none of ARGUS's.
 
 | Folder | What |
 |---|---|
-| `image/Dockerfile` | the build recipe; build commands in its header |
+| `skills/cdeep3m/` | the skill: `SKILL.md` and `cdeep3m_lib.py`, one function per task |
+| `image/Dockerfile` | the build recipe; build from the repository root (commands in its header) |
 | `image/pod_test.sh` | CDeep3M-anywhere's acceptance test, adapted to run inside a pod (no Docker) |
 | `docs/test_results.md` | results on NRP CPU and GPU pods |
+
+## The cdeep3m skill
+
+The agent calls tested functions instead of writing its own segmentation code:
+
+| Task | Function |
+|---|---|
+| hardware, folders, time estimates | `environment()` |
+| list or change settings | `settings()`, `set_defaults(...)` |
+| models available | `models()` |
+| segment images | `predict(images, model=...)` |
+| score against expert labels | `evaluate(prediction, labels)` |
+| figure: image, probability, mask, label, agreement | `show(prediction, labels=...)` |
+| training data from labelled slices | `prepare_training(images, labels)` |
+| fine-tune or train (plan first, then in the background) | `train(model, data, start=...)` |
+| follow / stop / continue training | `training_status()`, `stop_training()`, `train(..., start=True)` |
+| make the trained network a model | `finish_training(run)` |
+
+Every setting (networks, prediction speed, device, threshold, updates, learning rate, batch,
+threads, …) can be given for one run as an argument, or for the whole project with
+`set_defaults()`; every report starts with the settings it used. Models, predictions and training
+runs are kept in a `cdeep3m/` folder next to the notebook.
 
 ## Quick check in a pod
 

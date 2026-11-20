@@ -3,10 +3,10 @@
 # =============================================================================
 # An ARGUS release image with Willy's CDeep3M-anywhere (EM image segmentation:
 # ncnn prediction on CPU or Vulkan GPU, PyTorch training) added on top, as
-# ARGUS-FEDER adds TokSearch. Built from this folder:
+# ARGUS-FEDER adds TokSearch, plus the cdeep3m skill. Built from the REPOSITORY ROOT:
 #
-#   docker build -t kaiucsd/argus-ncuvo:<version>-cpu .
-#   docker build -t kaiucsd/argus-ncuvo:<version>-cu118 \
+#   docker build -f image/Dockerfile -t kaiucsd/argus-ncuvo:<version>-cpu .
+#   docker build -f image/Dockerfile -t kaiucsd/argus-ncuvo:<version>-cu118 \
 #       --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu118 --build-arg TORCH_SPEC="torch==2.7.1" .
 #
 # The CDeep3M steps follow CDeep3m-anywhere/docker/Dockerfile; they differ only in the
@@ -75,7 +75,9 @@ COPY --from=builder /opt/ncnn_build /opt/ncnn_build
 COPY --from=builder /opt/cdeep3m2 /opt/cdeep3m2
 COPY --from=builder /opt/cdeep3m-anywhere /opt/cdeep3m-anywhere
 COPY --from=builder /opt/caffe.proto /opt/caffe.proto
-COPY pod_test.sh /opt/argus-ncuvo/pod_test.sh
+COPY image/pod_test.sh /opt/argus-ncuvo/pod_test.sh
+# The skill, where ARGUS looks for skills (as its core skills are installed)
+COPY --chown=${NB_UID}:${NB_GID} skills/cdeep3m /home/${NB_USER}/.deepagents/agent/skills/cdeep3m
 # As in Willy's Dockerfile: patch CDeep3M2, make its scripts executable and run them with the
 # environment's python. chmod only these folders: /opt also holds conda.
 RUN cd /opt/cdeep3m2 \
@@ -89,7 +91,7 @@ RUN cd /opt/cdeep3m2 \
 ENV CDEEP3M2=/opt/cdeep3m2 \
     NCNN_BUILD=/opt/ncnn_build \
     CAFFE_PROTO=/opt/caffe.proto \
-    PYTHONPATH=/opt/cdeep3m-anywhere \
+    PYTHONPATH=/opt/cdeep3m-anywhere:/home/jovyan/.deepagents/agent/skills/cdeep3m \
     PATH=/opt/argus-ncuvo:/opt/cdeep3m2:/opt/cdeep3m-anywhere/ncnn:/opt/cdeep3m-anywhere/tools:/opt/cdeep3m-anywhere/singularity:$PATH \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=all

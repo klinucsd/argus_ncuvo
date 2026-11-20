@@ -44,3 +44,23 @@ Published:
 4. ARGUS on CDeep3M's output: per-image Dice 0.6791 / 0.7895 / 0.7032, overall 0.7247 (the test's
    own figure), side-by-side figure. Slips to fix in a skill: no colour key on the agreement map;
    the prediction column shows the probability map under a "p>0.5" heading.
+
+## The cdeep3m skill on the build machine (CPU, 8 threads), 2026-11-20
+
+Full cycle on the sample data in `kaiucsd/argus-ncuvo:0.1-cpu` with the skill mounted:
+- `predict` with the pretrained SBEM mitochondria model (downloaded on first use, 13 s): 10 validation
+  images in 25 s; `evaluate`: overall Dice 0.7241 (first three images identical to the GPU run).
+- `prepare_training` (20 slices, 18 s, 2.7 GB); `train` plan, start in the background, a second start
+  refused, `stop_training` at update 12 with progress saved, resumed from update 12 to 30 (3.1 s/update);
+  `training_status` with loss curve; `finish_training` → model `mito-ft`; `predict` + `evaluate` with it:
+  Dice 0.7075 (30 updates on 20 slices; CDeep3M-anywhere reports the same kind of small change).
+- Fixed during testing: a finished training process was still reported as running (unreaped child).
+
+Published with the skill:
+
+| Tag | Size | Digest |
+|---|---|---|
+| `kaiucsd/argus-ncuvo:0.2-cpu` | 5.12 GB | `sha256:0f4f335d75fabd46a07f06594a4aa39f16635d66e161c9642f726d77090365e7` |
+| `kaiucsd/argus-ncuvo:0.2-cu118` | 9.81 GB | `sha256:4ac6384a9d12d94c42f678210dac4c2e2e2531ee82c1cd9eb23e59032bfa12f9` |
+
+Pod test of the skill through ARGUS (`%%ask`): pending.

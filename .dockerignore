@@ -1,0 +1,4 @@
+*
+!image/pod_test.sh
+!skills/
+skills/**/__pycache__
