@@ -44,7 +44,8 @@ Use the user's words for files and folders; when they give none, the sample data
 | stop / continue training | `cd.stop_training(run_name)` / `cd.train(..., name=run_name, start=True)` |
 | use the trained network | `cd.finish_training(run_name, model_name=...)`, then `cd.predict(..., model=model_name)` |
 
-`model=None` in `train` trains from scratch (learning rate 0.01 unless the user sets one);
+Wherever a function takes a prediction, training data, run or model, pass either its name or what the
+earlier function returned. `model=None` in `train` trains from scratch (learning rate 0.01 unless the user sets one);
 otherwise it fine-tunes the given model, the usual and much faster way.
 
 ## Rules

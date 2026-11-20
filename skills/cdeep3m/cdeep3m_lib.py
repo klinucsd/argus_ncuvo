@@ -32,7 +32,7 @@ import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 3
+LIB_VERSION = 4
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
@@ -413,6 +413,7 @@ def _stamp():
 
 def predict(images, model="sbem-mitochondria", name=None, **overrides):
     """Segment the images in a folder (or one image). Settings: frames, augspeed, device, precision, threshold."""
+    model = _name(model)
     s = _effective(overrides)
     files = _check_folder(images, "prediction")
     name = name or "%s_%s" % (model, _stamp())
@@ -479,7 +480,13 @@ def _write_masks(prob_dir, mask_dir, threshold):
     return out
 
 
+def _name(x):
+    """Functions accept a name or the dict an earlier step returned (predict, prepare_training, train)."""
+    return x["name"] if isinstance(x, dict) and "name" in x else x
+
+
 def _prediction_folder(prediction):
+    prediction = _name(prediction)
     if os.path.isdir(prediction):
         return prediction
     d = os.path.join(_workspace(), "predictions", prediction)
@@ -629,6 +636,7 @@ def prepare_training(images, labels, name=None):
 
 
 def _data_folder(data):
+    data = _name(data)
     if os.path.isdir(data) and glob.glob(os.path.join(data, "*.h5")):
         return data
     d = os.path.join(_scratch(), "training_data", data)
@@ -668,6 +676,7 @@ def train(model, training_data, name=None, start=False, **overrides):
     """Fine-tune a model (or train from scratch with model=None) in the background.
     Without start=True it only shows the plan. Settings: frames, updates, learning_rate, iter_size, batch,
     device, threads, checkpoint_every. Running it again with the same name continues a stopped run."""
+    model = _name(model)
     from_scratch = model is None
     if from_scratch and "learning_rate" not in overrides and "learning_rate" not in _saved():
         overrides["learning_rate"] = 0.01
@@ -735,6 +744,7 @@ def train(model, training_data, name=None, start=False, **overrides):
 
 def training_status(name, plot=True):
     """Progress of a training run: updates done, loss, speed, time left, and a loss curve."""
+    name = _name(name)
     rd = _run_dir(name)
     try:
         info = json.load(open(os.path.join(rd, "run.json")))
@@ -793,6 +803,7 @@ def training_status(name, plot=True):
 
 def stop_training(name):
     """Stop a run; it saves its progress. train() with the same name and start=True continues it."""
+    name = _name(name)
     rd = _run_dir(name)
     info = json.load(open(os.path.join(rd, "run.json")))
     open(os.path.join(rd, "STOP"), "w").write(time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -808,6 +819,7 @@ def stop_training(name):
 
 def finish_training(name, model_name=None):
     """Turn a training run into a model for predict(): export, re-estimate BatchNorm, convert to ncnn."""
+    name = _name(name)
     rd = _run_dir(name)
     info = json.load(open(os.path.join(rd, "run.json")))
     if _alive(info.get("pid")):
