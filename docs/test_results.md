@@ -27,4 +27,11 @@ Checked on the build machine (no GPU):
 - ARGUS: `%%ask` and `%%skill` magics load, deepagents 0.7.24, 18 core skills, JupyterLab 4.2.4.
 - CDeep3M: tools on `PATH` (including `gpu_check.sh`), trainer imports.
 
-Pod test of this image: pending.
+Published:
+
+| Tag | Size | Digest |
+|---|---|---|
+| `kaiucsd/argus-ncuvo:0.1-cpu` | 5.12 GB | `sha256:02de81130cb4b66ca9579859ec32913c1a7184f0bfb82fb7a5e3054bcf4f081f` |
+| `kaiucsd/argus-ncuvo:0.1-cu118` | 9.81 GB | `sha256:eb4fcf30cf9da2f051568181b4560be7928681d0823945070be188ab203b4467` |
+
+Pod test of these images: pending.
