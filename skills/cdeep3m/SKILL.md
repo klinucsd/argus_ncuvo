@@ -15,8 +15,17 @@ import importlib, cdeep3m_lib as cd
 importlib.reload(cd)          # pick up the current version
 ```
 
-Do each request in one script. Use the user's words for files and folders; when they give none,
-the sample data (`cd.sample_data()`) is there for trying things out.
+This file and the table below are the whole interface: call the functions directly, without opening
+`cdeep3m_lib.py` first. Each function's arguments are its settings (`cd.settings()` lists them).
+
+**Do only what the request asks, in one script.** Pick the functions from the table that answer it
+and stop there. A question about what is possible, what is available or how long something would take
+is answered with reports (`environment`, `models`, `settings`, `sample_data`): nothing is downloaded,
+prepared, trained or predicted for it. Downloads, data preparation, prediction and training happen
+only when the user asks for that work.
+
+Use the user's words for files and folders; when they give none, the sample data
+(`cd.sample_data()`) is there for trying things out.
 
 ## Which function for which request
 
@@ -50,6 +59,7 @@ otherwise it fine-tunes the given model, the usual and much faster way.
    asks to change something, pass the matching setting; if nothing matches, say so.
 4. **Pairing for scores:** `evaluate` and `show` pair predictions and labels in sorted file order.
    Make sure the label folder holds the labels of the same images, in the same order.
-5. Large temporary files (training data, prediction work files) live in `/tmp/cdeep3m` and are lost
-   when the pod stops; models, predictions, runs and settings are kept in the project folder
-   `cdeep3m/` next to the notebook. Embed figures with the path the function prints.
+5. Pretrained models and training data live in the temporary folder `/tmp/cdeep3m` (large; lost when
+   the pod stops, and downloaded or prepared again in seconds to minutes). Own trained models,
+   predictions, runs and settings are kept in the project folder `cdeep3m/` next to the notebook.
+   Embed figures with the path the function prints.

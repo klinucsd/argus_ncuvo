@@ -32,7 +32,7 @@ import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 1
+LIB_VERSION = 2
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
@@ -112,9 +112,30 @@ def _scratch():
 
 
 def _models_dir():
+    """The project's own trained models (small, kept)."""
     m = os.environ.get("CDEEP3M_MODELS") or os.path.join(_workspace(), "models")
     os.makedirs(m, exist_ok=True)
     return m
+
+
+def _zoo_dir():
+    """Downloaded pretrained models: large and re-downloadable in seconds, so kept in the temporary
+    folder rather than on the project's (often small) persistent storage."""
+    z = os.path.join(_scratch(), "pretrained")
+    os.makedirs(z, exist_ok=True)
+    return z
+
+
+def _model_path(name):
+    return os.path.join(_zoo_dir() if name in ZOO else _models_dir(), name)
+
+
+def _free_gb(path):
+    try:
+        st = os.statvfs(path)
+        return st.f_bavail * st.f_frsize / 1e9
+    except OSError:
+        return float("nan")
 
 
 def _settings_file():
@@ -246,9 +267,9 @@ def environment():
     print("| GPU | %s |" % (gpu or "none"))
     print("| PyTorch | %s, GPU training %s |" % (tv, "available" if cuda else "not available"))
     print("| CPUs available | %d |" % cpu_count())
-    print("| Project folder | `%s` |" % _workspace())
-    print("| Models | `%s` |" % _models_dir())
-    print("| Large temporary files | `%s` (not kept when the pod stops) |" % _scratch())
+    print("| Project folder (kept): own models, results, runs | `%s`, %.1f GB free |" % (_workspace(), _free_gb(_workspace())))
+    print("| Temporary folder: pretrained models, training data | `%s`, %.1f GB free, not kept when the pod stops |"
+          % (_scratch(), _free_gb(_scratch())))
     spu = _seconds_per_update(s, gpu if cuda else None)
     print("\nTraining with the current settings: about %.1f s per update, so %d updates take about %s. "
           "Estimates from measured runs; the first updates show the real speed."
@@ -304,7 +325,7 @@ def models():
     print("## Models\n")
     print("| Model | What it segments | Source | Available here |\n|---|---|---|---|")
     for k, z in ZOO.items():
-        here = os.path.isdir(os.path.join(_models_dir(), k, "1fm"))
+        here = os.path.isdir(os.path.join(_zoo_dir(), k, "1fm"))
         print("| %s | %s | model zoo, DOI %s (%s) | %s |" % (k, z["about"], z["doi"], z["size"],
                                                            "yes" if here else "downloaded on first use"))
     own = []
@@ -335,7 +356,7 @@ def _caffemodel(frame_dir):
 def get_model(name, frames=None, calibration_images=None):
     """Make a model ready for prediction: download a pretrained one if needed, convert to ncnn.
     calibration_images: a folder of training images to also build an int8 version (faster on the CPU)."""
-    d = os.path.join(_models_dir(), name)
+    d = _model_path(name)
     fl = _frames(frames or "1fm")
     log = os.path.join(_scratch(), "get_model.log")
     if not os.path.isfile(os.path.join(d, "1fm", "deploy.prototxt")):
@@ -415,7 +436,7 @@ def predict(images, model="sbem-mitochondria", name=None, **overrides):
     t0 = time.time()
     rc = _run([CDEEP3M2 + "/runprediction.sh", "--models", ",".join(s["frames"]), "--denoise", "0",
                "--augspeed", s["augspeed"], "--backend", "ncnn", "--device", dev,
-               os.path.join(_models_dir(), model), images, work], log, cwd=CDEEP3M2, env=env)
+               _model_path(model), images, work], log, cwd=CDEEP3M2, env=env)
     took = time.time() - t0
     if rc != 0 or not os.path.isfile(os.path.join(work, "DONE")):
         err = _tail(os.path.join(work, "ERROR"), 5) + _tail(log)
@@ -682,7 +703,7 @@ def train(model, training_data, name=None, start=False, **overrides):
     dev = {"auto": "auto", "gpu": "cuda", "cpu": "cpu"}[s["device"]]
     lines = ["cd %s" % ANYWHERE]
     for f in s["frames"]:
-        fd = os.path.join(_models_dir(), base, f)
+        fd = os.path.join(_model_path(base), f)
         out = os.path.join(rd, f)
         args = ["python3", "-m", "trainer.train", "--model", f, "--deploy", os.path.join(fd, "deploy.prototxt"),
                 "--data", data, "--out", out, "--max-iter", s["updates"], "--base-lr", s["learning_rate"],
@@ -802,7 +823,9 @@ def finish_training(name, model_name=None):
         if not os.path.isfile(ck):
             print("| %s | 0 | no checkpoint, skipped |" % f)
             continue
-        base = os.path.join(_models_dir(), info["base_model"], f)
+        base = os.path.join(_model_path(info["base_model"]), f)
+        if not os.path.isdir(base):
+            get_model(info["base_model"], frames=f)
         fd = os.path.join(md, f)
         os.makedirs(os.path.join(fd, "trainedmodel"), exist_ok=True)
         shutil.copy(os.path.join(base, "deploy.prototxt"), fd)
