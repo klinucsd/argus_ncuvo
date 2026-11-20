@@ -32,7 +32,7 @@ import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 4
+LIB_VERSION = 5
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
@@ -690,7 +690,7 @@ def train(model, training_data, name=None, start=False, **overrides):
     total = spu * s["updates"] * len(s["frames"])
     print("## Training %s: %s\n" % ("plan" if not start else "started", name))
     print("**Settings used**\n")
-    print(_settings_table(dict(s, model="none (from scratch)" if from_scratch else model, data=training_data),
+    print(_settings_table(dict(s, model="none (from scratch)" if from_scratch else model, data=_name(training_data)),
                           ["model", "data", "frames", "updates", "learning_rate", "iter_size", "batch",
                            "device", "threads", "checkpoint_every"]))
     print("\nHardware: %s, %d CPUs. Estimated time: about %s (%.1f s per update%s)." % (
@@ -705,7 +705,7 @@ def train(model, training_data, name=None, start=False, **overrides):
         print("\nThis run is already training (process %s). Use training_status(%r)." % (info["pid"], name))
         return {"name": name, "running": True}
     if not start:
-        print("\nNothing started yet. To start, call `train(..., start=True)` with the same arguments.")
+        print("\nNothing has started yet; training starts only when you confirm.")
         return {"name": name, "started": False, "estimated_seconds": total}
     get_model(base, frames=s["frames"])
     os.makedirs(rd, exist_ok=True)
