@@ -84,3 +84,20 @@ Published with all of the above:
 |---|---|---|
 | `kaiucsd/argus-ncuvo:0.3-cpu` | 5.12 GB | `sha256:0c97d4d5dfaa2350fdd7aa9f35fe332681e88505f5eebd6d546c686dd0f97f44` |
 | `kaiucsd/argus-ncuvo:0.3-cu118` | 9.81 GB | `sha256:c66d2fafcc597a71a740047acaeb9e20ab385616794eec820886a6d84ee2c587` |
+
+## Clean rerun on `kaiucsd/argus-ncuvo:0.3-cu118` (NRP, RTX 2080 Ti), 2026-11-20
+
+`notebooks/cdeep3m_skill_test.ipynb` (saved with its outputs), fresh pod, nothing copied in by hand,
+no earlier lessons or project files. All six questions answered without a failed call:
+
+| Question | Tool calls | Result |
+|---|---|---|
+| What can I do here? | 4 | Reports only: nothing downloaded or prepared, library source not opened |
+| Segment, score, show | 10 | GPU (Vulkan), 10 images in 61 s; Dice 0.8403 (same as the first test); figure with colour key |
+| Plan a fine-tune (300 updates, lr 0.0005) | 4 | Data prepared, plan only, waited for the go-ahead |
+| Start it | 5 | Started with the approved settings, returned at once |
+| How is it going? | 3 | Finished; loss 0.0719 average, 0.0665 last; loss curve |
+| New model, compare | 10 | `compare()`: Dice 0.8145 vs 0.8403, lower on all 10 images, matching both tables |
+
+Remaining cosmetic points: in one answer the agent put its own heading above a report's heading; one
+answer calls lr 0.0005 "fairly aggressive" (it is half the default).
