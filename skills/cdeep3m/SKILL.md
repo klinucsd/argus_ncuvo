@@ -39,6 +39,7 @@ Use the user's words for files and folders; when they give none, the sample data
 | try the sample data | `cd.sample_data()` |
 | segment images | `cd.predict(images, model=..., name=...)` |
 | score a segmentation against expert labels | `cd.evaluate(prediction, labels)` |
+| compare two or more models or settings on the same images | `cd.compare([prediction1, prediction2, ...], labels)` (first = reference) → embed the chart |
 | see a segmentation | `cd.show(prediction, labels=...)` → embed the returned PNG with `![...](path)` |
 | prepare labelled slices for training | `cd.prepare_training(images, labels, name=...)` |
 | train or fine-tune | `cd.train(model, training_data, name=...)` first (plan only), then the same call with `start=True` |

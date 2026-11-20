@@ -15,6 +15,7 @@ so an answer can show exactly how a result was produced, and returns a dict for 
     cd.training_status("mito-ft"); cd.stop_training("mito-ft")
     cd.finish_training("mito-ft")                      # -> a model usable by predict()
     cd.evaluate("<prediction name>", "labels/"); cd.show("<prediction name>", labels="labels/")
+    cd.compare(["<prediction 1>", "<prediction 2>"], "labels/")   # side by side, per-image changes
 
 Built on CDeep3M-anywhere (CRBS/NCMIR): CDeep3M2's pipeline, ncnn prediction, PyTorch trainer.
 """
@@ -32,7 +33,7 @@ import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 6
+LIB_VERSION = 7
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
@@ -547,6 +548,80 @@ def evaluate(prediction, labels, threshold=None):
         w.writerows(rows)
     print("Scores saved to `%s`." % path)
     return {"per_image": rows, "overall": tot, "csv": path}
+
+
+def compare(predictions, labels, threshold=None):
+    """Compare two or more predictions of the same images against the same labels: overall scores side
+    by side, per-image Dice with the change from the first, how many images improved, and a bar chart.
+    The first prediction is the reference."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    s = _effective({"threshold": threshold})
+    t = s["threshold"]
+    preds = [_name(p) for p in predictions]
+    if len(preds) < 2:
+        raise ValueError("compare needs at least two predictions")
+    res = {}
+    for p in preds:
+        d, meta, pairs = _pairs(p, labels)
+        per, TP, FP, FN = [], 0, 0, 0
+        for img, lab, pr, lb in pairs:
+            m = pr > t * 255
+            tp, fp, fn = int((m & lb).sum()), int((m & ~lb).sum()), int((~m & lb).sum())
+            TP, FP, FN = TP + tp, FP + fp, FN + fn
+            per.append((img, _scores(tp, fp, fn)["dice"]))
+        res[p] = {"model": meta.get("model", "?"), "overall": _scores(TP, FP, FN), "per_image": per,
+                  "fp": FP, "fn": FN}
+    ref = preds[0]
+    imgs = [i for i, _ in res[ref]["per_image"]]
+    for p in preds[1:]:
+        if [i for i, _ in res[p]["per_image"]] != imgs:
+            raise ValueError("%s and %s were not made from the same images" % (ref, p))
+    print("## Comparison (reference: %s)\n" % ref)
+    print("Threshold %s; labels from `%s`; overall scores pool the pixels of all %d images.\n" % (t, labels, len(imgs)))
+    print("| Prediction | Model | Dice | IoU | Precision | Recall | Pixels predicted wrongly | Pixels missed |")
+    print("|---|---|---|---|---|---|---|---|")
+    for p in preds:
+        o = res[p]["overall"]
+        print("| %s | %s | %.4f | %.4f | %.4f | %.4f | %d | %d |" % (p, res[p]["model"], o["dice"], o["iou"],
+                                                               o["precision"], o["recall"], res[p]["fp"], res[p]["fn"]))
+    for p in preds[1:]:
+        o, r = res[p]["overall"], res[ref]["overall"]
+        print("| change, %s vs %s | | %+.4f | %+.4f | %+.4f | %+.4f | %+d | %+d |" % (
+            p, ref, o["dice"] - r["dice"], o["iou"] - r["iou"], o["precision"] - r["precision"],
+            o["recall"] - r["recall"], res[p]["fp"] - res[ref]["fp"], res[p]["fn"] - res[ref]["fn"]))
+    print("\n**Dice per image**\n")
+    print("| Image | " + " | ".join(preds) + " | " + " | ".join("change, %s" % p for p in preds[1:]) + " |")
+    print("|---|" + "---|" * (2 * len(preds) - 1))
+    for k, img in enumerate(imgs):
+        vals = [res[p]["per_image"][k][1] for p in preds]
+        print("| %s | %s | %s |" % (img, " | ".join("%.4f" % v for v in vals),
+                                    " | ".join("%+.4f" % (v - vals[0]) for v in vals[1:])))
+    for p in preds[1:]:
+        diffs = [res[p]["per_image"][k][1] - res[ref]["per_image"][k][1] for k in range(len(imgs))]
+        up, down = sum(x > 0 for x in diffs), sum(x < 0 for x in diffs)
+        print("\n%s against %s: Dice higher on %d of %d images, lower on %d, unchanged on %d." % (
+            p, ref, up, len(imgs), down, len(imgs) - up - down))
+    names = ["dice", "iou", "precision", "recall"]
+    fig, axes = plt.subplots(1, 4, figsize=(14, 3.6))
+    for ax, k in zip(axes, names):
+        vals = [res[p]["overall"][k] for p in preds]
+        bars = ax.bar(range(len(preds)), vals, color=["#1f4e79", "#c0504d", "#4f8f3a", "#8064a2"][:len(preds)])
+        for b, v in zip(bars, vals):
+            ax.text(b.get_x() + b.get_width() / 2, v + 0.01, "%.4f" % v, ha="center", fontsize=9)
+        ax.set_xticks(range(len(preds)))
+        ax.set_xticklabels(preds, rotation=15, fontsize=8)
+        ax.set_ylim(0, 1.05)
+        ax.set_title({"iou": "IoU"}.get(k, k.capitalize()))
+    fig.suptitle("Overall scores, threshold %s" % t)
+    fig.tight_layout()
+    path = os.path.join(_prediction_folder(preds[-1]), "comparison_scores.png")
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+    shown = _for_display(path)
+    print("\nChart (embed this path): `%s`" % shown)
+    return {"predictions": res, "figure": shown}
 
 
 def _scores(tp, fp, fn):
