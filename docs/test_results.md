@@ -63,4 +63,24 @@ Published with the skill:
 | `kaiucsd/argus-ncuvo:0.2-cpu` | 5.12 GB | `sha256:0f4f335d75fabd46a07f06594a4aa39f16635d66e161c9642f726d77090365e7` |
 | `kaiucsd/argus-ncuvo:0.2-cu118` | 9.81 GB | `sha256:4ac6384a9d12d94c42f678210dac4c2e2e2531ee82c1cd9eb23e59032bfa12f9` |
 
-Pod test of the skill through ARGUS (`%%ask`): pending.
+## The skill through ARGUS on an NRP GPU pod (RTX 2080 Ti, 2 CPUs), 2026-11-20
+
+`notebooks/cdeep3m_skill_test.ipynb`, six plain-English questions, all answered, with fixes made
+between questions (copied into the pod; now in the 0.3 images):
+
+| Question | Result | Fixed after it |
+|---|---|---|
+| What can I do here? | First try: read the library source, prepared data, started a download into a persistent folder with 1.4 GB free (interrupted). After the fix: 5 tool calls, reports only. | "Do only what is asked"; pretrained models, training data and runs moved to `/tmp`; free space reported |
+| Segment, score, show | GPU (Vulkan), 10 images in 52 s; Dice 0.8403 = CDeep3M-anywhere's own figure for 8 variants; figure with colour key | Functions accept the previous step's result (the agent passed `predict()`'s dict to `evaluate()`) |
+| Plan a fine-tune (300 updates, lr 0.0005) | Data prepared (10 s), plan only, 3 tool calls, asked for go-ahead | Plan shows the data's name; last line addressed to the user |
+| Start it | Started with exactly the planned settings, returned at once | SKILL.md used a loose argument name (`data_name`); now exact names; answers in plain words |
+| How is it going? | Finished, 300 updates in about 2 min, loss 0.16 → 0.07, loss curve | — |
+| Make a model, compare | New model on the persistent folder; Dice 0.8148 vs 0.8403 (more precise, lower recall) | Agent's own comparison said "9 of 10 images" got worse where its tables show all 10: new `compare()` |
+
+
+Published with all of the above:
+
+| Tag | Size | Digest |
+|---|---|---|
+| `kaiucsd/argus-ncuvo:0.3-cpu` | 5.12 GB | `sha256:0c97d4d5dfaa2350fdd7aa9f35fe332681e88505f5eebd6d546c686dd0f97f44` |
+| `kaiucsd/argus-ncuvo:0.3-cu118` | 9.81 GB | `sha256:c66d2fafcc597a71a740047acaeb9e20ab385616794eec820886a6d84ee2c587` |
