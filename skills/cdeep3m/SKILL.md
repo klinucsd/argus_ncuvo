@@ -9,6 +9,8 @@ Everything is done by the functions of `cdeep3m_lib`, shipped with this skill. C
 call CDeep3M's shell scripts or write your own segmentation, training or scoring code. Each function
 prints a Markdown report that begins with the settings it used: present that report as printed, under
 its own heading (do not add another heading above it), with at most one sentence of your own around it.
+Talk to the user about images, models, training and results in plain words; function names and code
+are for your scripts, not for the answer.
 
 ```python
 import importlib, cdeep3m_lib as cd
@@ -29,20 +31,20 @@ Use the user's words for files and folders; when they give none, the sample data
 
 ## Which function for which request
 
-| The user wants to … | Call |
+| The user wants to … | Call (exact argument names) |
 |---|---|
 | know what hardware, folders and speed to expect | `cd.environment()` |
-| see or change settings | `cd.settings()`; for this request only pass them as arguments; for the whole project `cd.set_defaults(name=value, ...)` |
+| see or change settings | `cd.settings()`; for this request only pass them as arguments; for the whole project `cd.set_defaults(updates=..., ...)` |
 | know which models exist | `cd.models()` |
 | try the sample data | `cd.sample_data()` |
 | segment images | `cd.predict(images, model=..., name=...)` |
-| score a segmentation against expert labels | `cd.evaluate(prediction_name, labels)` |
-| see a segmentation | `cd.show(prediction_name, labels=...)` → embed the returned PNG with `![...](path)` |
+| score a segmentation against expert labels | `cd.evaluate(prediction, labels)` |
+| see a segmentation | `cd.show(prediction, labels=...)` → embed the returned PNG with `![...](path)` |
 | prepare labelled slices for training | `cd.prepare_training(images, labels, name=...)` |
-| train or fine-tune | `cd.train(model, data_name, name=...)` first (plan only), then with `start=True` |
-| follow training | `cd.training_status(run_name)` → embed the loss curve |
-| stop / continue training | `cd.stop_training(run_name)` / `cd.train(..., name=run_name, start=True)` |
-| use the trained network | `cd.finish_training(run_name, model_name=...)`, then `cd.predict(..., model=model_name)` |
+| train or fine-tune | `cd.train(model, training_data, name=...)` first (plan only), then the same call with `start=True` |
+| follow training | `cd.training_status(name)` → embed the loss curve |
+| stop / continue training | `cd.stop_training(name)` / `cd.train(model, training_data, name=..., start=True)` |
+| use the trained network | `cd.finish_training(name, model_name=...)`, then `cd.predict(images, model=model_name)` |
 
 Wherever a function takes a prediction, training data, run or model, pass either its name or what the
 earlier function returned. `model=None` in `train` trains from scratch (learning rate 0.01 unless the user sets one);

@@ -32,7 +32,7 @@ import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 5
+LIB_VERSION = 6
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
@@ -187,8 +187,7 @@ def settings():
     saved = _saved()
     s = _effective({})
     print("## Settings\n")
-    print("Change one for a single run by passing it to the function, e.g. `train(..., updates=5000)`; "
-          "change it for the whole project with `set_defaults(updates=5000)`.\n")
+    print("Any setting can be changed for a single run, or saved as this project's default.\n")
     print("| Setting | Current | Default | Meaning |")
     print("|---|---|---|---|")
     for k, (d, doc) in SETTINGS.items():
@@ -464,7 +463,7 @@ def predict(images, model="sbem-mitochondria", name=None, **overrides):
     print("| Probability maps (0–255) | `%s/probability` |" % out)
     print("| Masks (probability > %s) | `%s/mask` |" % (s["threshold"], out))
     print("| Overlays on the images | `%s/overlay` |" % out)
-    print("\nPrediction name for evaluate() and show(): `%s`" % name)
+    print("\nPrediction name: `%s`" % name)
     return {"name": name, "folder": out, "probability": probs, "masks": masks, "seconds": took}
 
 
@@ -631,7 +630,7 @@ def prepare_training(images, labels, name=None):
     print("| Labelled slices | %d (%d x %d) |" % (len(im), s0[0], s0[1]))
     print("| Augmented training files | %.1f GB in `%s` |" % (size, out))
     print("| Time | %s |" % _fmt_time(time.time() - t0))
-    print("\nTemporary: kept only while the pod runs. Training data name for train(): `%s`" % name)
+    print("\nTraining data name: `%s` (temporary: kept only while the pod runs)" % name)
     return {"name": name, "folder": out}
 
 
@@ -702,7 +701,7 @@ def train(model, training_data, name=None, start=False, **overrides):
     except (OSError, ValueError):
         pass
     if info and _alive(info.get("pid")):
-        print("\nThis run is already training (process %s). Use training_status(%r)." % (info["pid"], name))
+        print("\nThis run is already training (process %s); ask how it is going at any time." % info["pid"])
         return {"name": name, "running": True}
     if not start:
         print("\nNothing has started yet; training starts only when you confirm.")
@@ -737,8 +736,8 @@ def train(model, training_data, name=None, start=False, **overrides):
                                            "threads", "checkpoint_every")},
             "started": time.strftime("%Y-%m-%d %H:%M:%S"), "gpu": gpu}
     json.dump(info, open(os.path.join(rd, "run.json"), "w"), indent=1)
-    print("\nStarted in the background (process %d). It keeps running between questions; "
-          "ask for training_status(%r) at any time." % (p.pid, name))
+    print("\nStarted in the background (process %d). Run name: `%s`. It keeps running between questions; "
+          "ask how the training is going at any time." % (p.pid, name))
     return {"name": name, "started": True, "pid": p.pid, "folder": rd}
 
 
@@ -813,7 +812,7 @@ def stop_training(name):
             if not _alive(info["pid"]):
                 break
             time.sleep(1)
-    print("Run %s stopped; progress is saved. Continue it with train(..., name=%r, start=True)." % (name, name))
+    print("Run `%s` stopped; its progress is saved and it can be continued." % name)
     return training_status(name, plot=False)
 
 
@@ -859,5 +858,5 @@ def finish_training(name, model_name=None):
     json.dump({"base_model": "none (from scratch)" if info["from_scratch"] else info["base_model"],
                "run": name, "updates": info["settings"]["updates"], "settings": info["settings"],
                "made": time.strftime("%Y-%m-%d %H:%M:%S")}, open(os.path.join(md, "source.json"), "w"), indent=1)
-    print("\nModel saved in `%s`. Use it with predict(images, model=%r, frames=%r)." % (md, model_name, ",".join(done)))
+    print("\nNew model `%s` (networks: %s) saved in `%s`; it can now segment images." % (model_name, ", ".join(done), md))
     return {"model": model_name, "folder": md, "frames": done}
