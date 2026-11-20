@@ -34,4 +34,13 @@ Published:
 | `kaiucsd/argus-ncuvo:0.1-cpu` | 5.12 GB | `sha256:02de81130cb4b66ca9579859ec32913c1a7184f0bfb82fb7a5e3054bcf4f081f` |
 | `kaiucsd/argus-ncuvo:0.1-cu118` | 9.81 GB | `sha256:eb4fcf30cf9da2f051568181b4560be7928681d0823945070be188ab203b4467` |
 
-Pod test of these images: pending.
+## Pod test of `kaiucsd/argus-ncuvo:0.1-cu118` (NRP, RTX 2080 Ti, 2 CPU threads), 2026-11-20
+
+`notebooks/argus_ncuvo_pod_test.ipynb`, all four steps passed:
+1. `gpu_check.sh`: ALL OK (CUDA and Vulkan).
+2. ARGUS `%%ask`: identified the GPU and ran a test calculation on it with the image's CUDA PyTorch.
+3. `DEVICE=vulkan pod_test.sh`: ALL STEPS PASSED; prediction 16 s on Vulkan, Dice 0.7247; training
+   0.2 s/update with the same losses as before.
+4. ARGUS on CDeep3M's output: per-image Dice 0.6791 / 0.7895 / 0.7032, overall 0.7247 (the test's
+   own figure), side-by-side figure. Slips to fix in a skill: no colour key on the agreement map;
+   the prediction column shows the probability map under a "p>0.5" heading.
