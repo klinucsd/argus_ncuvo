@@ -7,8 +7,8 @@ description: Segment electron, light or X-ray microscopy images with CDeep3M dee
 
 Everything is done by the functions of `cdeep3m_lib`, shipped with this skill. Call them; do not
 call CDeep3M's shell scripts or write your own segmentation, training or scoring code. Each function
-prints a Markdown report that begins with the settings it used: present that report as printed, with
-at most one sentence of your own around it.
+prints a Markdown report that begins with the settings it used: present that report as printed, under
+its own heading (do not add another heading above it), with at most one sentence of your own around it.
 
 ```python
 import importlib, cdeep3m_lib as cd
@@ -59,7 +59,8 @@ otherwise it fine-tunes the given model, the usual and much faster way.
    asks to change something, pass the matching setting; if nothing matches, say so.
 4. **Pairing for scores:** `evaluate` and `show` pair predictions and labels in sorted file order.
    Make sure the label folder holds the labels of the same images, in the same order.
-5. Pretrained models and training data live in the temporary folder `/tmp/cdeep3m` (large; lost when
-   the pod stops, and downloaded or prepared again in seconds to minutes). Own trained models,
-   predictions, runs and settings are kept in the project folder `cdeep3m/` next to the notebook.
+5. Pretrained models, training data and training runs live in the temporary folder `/tmp/cdeep3m`
+   (large; lost when the pod stops). Own trained models (from `finish_training`), predictions and
+   settings are kept in the project folder `cdeep3m/` next to the notebook. When a pod restart has
+   cleared a run, prepare the data and start it again.
    Embed figures with the path the function prints.

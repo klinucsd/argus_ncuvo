@@ -32,7 +32,7 @@ import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 2
+LIB_VERSION = 3
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
@@ -267,8 +267,8 @@ def environment():
     print("| GPU | %s |" % (gpu or "none"))
     print("| PyTorch | %s, GPU training %s |" % (tv, "available" if cuda else "not available"))
     print("| CPUs available | %d |" % cpu_count())
-    print("| Project folder (kept): own models, results, runs | `%s`, %.1f GB free |" % (_workspace(), _free_gb(_workspace())))
-    print("| Temporary folder: pretrained models, training data | `%s`, %.1f GB free, not kept when the pod stops |"
+    print("| Project folder (kept): own models, predictions, settings | `%s`, %.1f GB free |" % (_workspace(), _free_gb(_workspace())))
+    print("| Temporary folder: pretrained models, training data, training runs | `%s`, %.1f GB free, not kept when the pod stops |"
           % (_scratch(), _free_gb(_scratch())))
     spu = _seconds_per_update(s, gpu if cuda else None)
     print("\nTraining with the current settings: about %.1f s per update, so %d updates take about %s. "
@@ -638,7 +638,9 @@ def _data_folder(data):
 
 
 def _run_dir(name):
-    return os.path.join(_workspace(), "runs", name)
+    """Training runs (checkpoints of ~200 MB each) stay in the temporary folder with their training
+    data: a run cannot continue without that data anyway. finish_training() keeps the result."""
+    return os.path.join(_scratch(), "runs", name)
 
 
 def _alive(pid):
