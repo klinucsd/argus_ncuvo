@@ -125,3 +125,27 @@ Published with all of the above, on `kaiucsd/argus-dev:v1.5.11-rc6`:
 |---|---|---|
 | `kaiucsd/argus-ncuvo:0.4.2-cpu` | 5.12 GB | `sha256:5f8b255ab7adef26283f531cd905161fe73b613f5a61781692a8961a87d2dd83` |
 | `kaiucsd/argus-ncuvo:0.4.2-cu118` | 9.81 GB | `sha256:8198c71e11c641866f2a207f6a53e2dbd5bc9505970f011ccf5a9c8b801bb78b` |
+
+## Cell Image Library skill on its own, NRP CPU pod, 2026-11-21
+
+`notebooks/cil_skill_test.ipynb` (saved with its outputs): nine questions to the `cil` skill on
+`0.4.2-cpu` with the newer skill copied in; the two questions on record 13523 were rerun after the fixes.
+
+| Question | Result | Fixed after it |
+|---|---|---|
+| What does CIL hold, under which terms? | Catalog summary; imaging methods and terms of use with counts | — |
+| Confocal Z-stacks of mouse neurons | 3 records (49851, 13524, 13523), with near-misses | "mouse" matched 7 records, as the catalog stores scientific names: common organism names now map to them (887) |
+| EM synapses, 2–6 nm, public domain, under 1 GB | 1 record (6519, 2.5 nm), with the near-misses and why | — |
+| Time-lapse videos of mitosis under 100 MB | 76 videos, by organism and terms | — |
+| Record 6519 and its ZIP | Details, files, citation; ZIP listed remotely without downloading | — |
+| Pixel size of 13523 | Rerun: "in-plane not recorded; Z step 1000 nm" | First run said no scale at all: a Z-only pixel size is now shown; the ZIP note appears only for records with a ZIP |
+| Download the TIFF of 6519 | 1.1 MB, checked as a valid TIFF | — |
+| 13523 as slices | Rerun: 8 greyscale 1024 × 1024 slices | First run gave 4-channel slices: channels-first (ZCYX) TIFFs now split by Z plane into greyscale |
+| Full original data of 49418 | 9.7 GB: size and terms reported, nothing downloaded, asked first | — |
+
+Published with these fixes (`cil` v4, commit 2f805ab), on `kaiucsd/argus-dev:v1.5.11-rc6`:
+
+| Tag | Size | Digest |
+|---|---|---|
+| `kaiucsd/argus-ncuvo:0.4.3-cpu` | 5.12 GB | `sha256:c889f12f892b96e768953f808418909552125788b0f3509906fde7d2bf2024ce` |
+| `kaiucsd/argus-ncuvo:0.4.3-cu118` | 9.81 GB | `sha256:f32529e4c7e500e5e9e4b0412665f275a7968a4347315cefa1167c2f51337c70` |
