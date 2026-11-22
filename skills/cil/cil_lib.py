@@ -21,7 +21,7 @@ import shutil
 import time
 import zipfile
 
-LIB_VERSION = 2
+LIB_VERSION = 4
 BASE = "https://cildata.crbs.ucsd.edu"
 SNAPSHOT = "CIL public metadata snapshot of April 2018 (10,023 records)"
 ASK_ABOVE_GB = 2.0          # downloads larger than this need confirm=True
@@ -75,14 +75,16 @@ def _size(n):
 
 def _px(r):
     x, y, z = r.get("pixel_nm_x"), r.get("pixel_nm_y"), r.get("pixel_nm_z")
-    if x is None or x != x:
+    ok = lambda v: v is not None and v == v
+    if not (ok(x) or ok(z)):
         return "—"
-    s = "%g" % round(x, 3)
-    if y is not None and y == y and abs(y - x) > 1e-9:
-        s += " × %g" % round(y, 3)
-    if z is not None and z == z:
-        s += ", Z %g" % round(z, 3)
-    return s + " nm"
+    if ok(x):
+        s = "%g" % round(x, 3) + (" × %g" % round(y, 3) if ok(y) and abs(y - x) > 1e-9 else "") + " nm"
+    else:
+        s = "in-plane not recorded"
+    if ok(z):
+        s += "; Z step %g nm" % round(z, 3)
+    return s
 
 
 def _dims(r):
@@ -127,6 +129,14 @@ def about():
     return {"records": n, "bytes": size, "electron_microscopy": em}
 
 
+# Common names of the organisms the catalog holds most often, by their scientific names.
+COMMON_NAMES = {"mouse": "Mus musculus", "mice": "Mus musculus", "human": "Homo sapiens",
+                "rat": "Rattus", "zebrafish": "Danio rerio", "fruit fly": "Drosophila", "fly": "Drosophila",
+                "worm": "Caenorhabditis elegans", "nematode": "Caenorhabditis elegans",
+                "yeast": "Saccharomyces", "frog": "Xenopus", "chicken": "Gallus gallus",
+                "arabidopsis": "Arabidopsis thaliana", "maize": "Zea mays", "corn": "Zea mays"}
+
+
 def _stem(word):
     """Drop the ending of a long word, so that singular and plural tags both match: the catalog has
     both "mitochondria" and "mitochondrion", "synapse" and "synapses"."""
@@ -140,7 +150,7 @@ def search(text=None, imaging=None, component=None, organism=None, cell_type=Non
     text        words matched against title, description, component, cell type, organism, imaging
     imaging     e.g. "electron", "confocal", "TEM", "SEM"
     component   cellular component, e.g. "mitochondri", "synapse", "membrane"
-    organism, cell_type, kind ("image" or "video"), z_stack (True for volumes)
+    organism    scientific or common name, e.g. "Mus musculus" or "mouse"; cell_type; kind ("image" or "video"); z_stack (True for volumes)
     pixel_nm    (low, high) pixel size range in nm, or one number (within a factor of 1.5)
     max_gb      only records whose files total at most this many GB
     terms       e.g. "public_domain", "cc_by", "nc" (non-commercial), "copyright"
@@ -151,7 +161,12 @@ def search(text=None, imaging=None, component=None, organism=None, cell_type=Non
             where.append("(title || ' ' || coalesce(description,'') || ' ' || coalesce(component,'') || ' ' || "
                          "coalesce(cell_type,'') || ' ' || coalesce(organism,'') || ' ' || coalesce(imaging_mode,'')) ILIKE ?")
             args.append("%" + _stem(w) + "%")
-    for col, v in (("imaging_mode", imaging), ("component", component), ("organism", organism),
+    if organism:                        # the catalog uses scientific names; accept the common ones too
+        names = [organism] + ([COMMON_NAMES[str(organism).strip().lower()]]
+                              if str(organism).strip().lower() in COMMON_NAMES else [])
+        where.append("(" + " OR ".join(["organism ILIKE ?"] * len(names)) + ")")
+        args.extend("%" + _stem(n) + "%" for n in names)
+    for col, v in (("imaging_mode", imaging), ("component", component),
                    ("cell_type", cell_type), ("terms", terms)):
         if v:
             where.append("%s ILIKE ?" % col)
@@ -226,8 +241,14 @@ def record(cil_id):
     for f in files:
         print("| %s%s | %s | %s | %s |" % (f["name"], " (extra)" if f.get("extra") else "", f.get("type") or "",
                                           _size(f.get("bytes")), f["url"]))
-    print("\nThe ZIP holds the data as submitted to CIL and the TIFF is CIL's converted copy; an extra file, "
-          "when there is one, is often the full original dataset. Pixel sizes are as the contributor recorded them.")
+    names = [f["name"].lower() for f in files if not f.get("extra")]
+    notes = []
+    if any(n.endswith(".zip") for n in names):
+        notes.append("The ZIP holds the data as submitted to CIL and the TIFF is CIL's converted copy.")
+    if any(f.get("extra") for f in files):
+        notes.append("The extra file is often the full original dataset.")
+    notes.append("Pixel sizes are as the contributor recorded them.")
+    print("\n" + " ".join(notes))
     return {"id": rid, "found": True, "kind": r["kind"], "z_stack": bool(r["z_stack"]),
             "pixel_nm": [r["pixel_nm_x"], r["pixel_nm_y"], r["pixel_nm_z"]], "files": files,
             "terms": r["terms"], "imaging": r["imaging_mode"], "component": r["component"], "title": r["title"]}
@@ -448,10 +469,25 @@ def _grey(a):
     return a
 
 
+def _channels_last(arr, axes):
+    """Squeeze to (Z,)Y,X(,C): the channel axis (C or S in the TIFF's axes) goes last, and channel counts
+    other than 3 or 4 are averaged to one, so a channels-first OME stack (ZCYX) splits by Z, not by channel."""
+    import numpy as np
+    for ax in ("C", "S"):
+        if ax in axes and arr.ndim == len(axes):
+            i = axes.index(ax)
+            arr = np.moveaxis(arr, i, -1)
+            axes = axes[:i] + axes[i + 1:] + ax
+            if arr.shape[-1] not in (3, 4):
+                arr = arr.mean(axis=-1).round().astype(arr.dtype)
+                axes = axes[:-1]
+            break
+    return np.squeeze(arr)
+
+
 def _normalize(folder):
     """One 2-D greyscale PNG or TIFF per slice, as CDeep3M expects: split multi-page TIFFs, turn colour
     into grey, and convert JPEGs (CDeep3M reads PNG and TIFF only). Names keep their sorted order."""
-    import numpy as np
     import tifffile
     from PIL import Image
     for name in sorted(os.listdir(folder)):
@@ -461,8 +497,8 @@ def _normalize(folder):
             continue
         if low.endswith((".tif", ".tiff")):
             with tifffile.TiffFile(p) as t:
-                arr = t.asarray()
-            arr = np.squeeze(arr)
+                arr, axes = t.series[0].asarray(), t.series[0].axes
+            arr = _channels_last(arr, axes)
             stack = arr.ndim == 4 or (arr.ndim == 3 and arr.shape[-1] not in (3, 4))
             if not stack:
                 g = _grey(arr)
