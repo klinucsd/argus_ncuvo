@@ -101,3 +101,27 @@ no earlier lessons or project files. All six questions answered without a failed
 
 Remaining cosmetic points: in one answer the agent put its own heading above a report's heading; one
 answer calls lr 0.0005 "fairly aggressive" (it is half the default).
+
+## Cell Image Library + model zoo on an NRP CPU pod, 2026-11-21
+
+`notebooks/cil_cdeep3m_test.ipynb` (saved with its outputs): the `cil` skill and the catalog-driven
+`cdeep3m` skill, first on `0.3-cpu` with both skills copied in, then rerun on `0.4.2-cpu`.
+
+| Question | Result | Fixed after it |
+|---|---|---|
+| What does CIL hold; which mitochondria models? | Catalog summary (10,023 records, 2,863 EM); the two mitochondria models of the 13-model zoo | — |
+| EM mitochondria records at 4–5 nm; best model? | 3 records (18469, 18477 at 4.1 nm; 12578 at 4.9 nm); both models a good fit; `sbem-mitochondria` chosen, freeze-fracture caveat | Tags are both "mitochondria" and "mitochondrion": search now matches either (88 → 460 EM records) |
+| Record 18477: files, terms, ZIP contents | Details, three files, public domain; ZIP listed remotely without downloading | — |
+| Segment 18477 with the best model | Model fit "good"; 685 MB model downloaded in 11 s; one 2500 × 3124 image in 740 s on the CPU (1fm, augspeed 1); figure | ARGUS showed nothing for 12 minutes: "Still running" line in argus-dev v1.5.11-rc6 |
+| Download the full original data of 49418 | 9.7 GB extra file: size and terms reported, nothing downloaded, asked first | First run fetched the small ZIP first: `download(file="extra")` |
+| What is CDeep3M storing? / Delete a prediction | Kept and temporary items with sizes; delete showed a preview only and asked first | New `storage()` and `delete()` |
+
+CPU speed for planning: about 95 µs per pixel for 1fm at augspeed 1, so a 50 GB volume with 1fm, 3fm
+and 5fm would take months on a CPU pod; it needs a GPU.
+
+Published with all of the above, on `kaiucsd/argus-dev:v1.5.11-rc6`:
+
+| Tag | Size | Digest |
+|---|---|---|
+| `kaiucsd/argus-ncuvo:0.4.2-cpu` | 5.12 GB | `sha256:5f8b255ab7adef26283f531cd905161fe73b613f5a61781692a8961a87d2dd83` |
+| `kaiucsd/argus-ncuvo:0.4.2-cu118` | 9.81 GB | `sha256:8198c71e11c641866f2a207f6a53e2dbd5bc9505970f011ccf5a9c8b801bb78b` |
