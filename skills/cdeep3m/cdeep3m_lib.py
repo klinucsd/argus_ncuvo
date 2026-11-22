@@ -7,8 +7,10 @@ so an answer can show exactly how a result was produced, and returns a dict for 
     cd.environment()                                   # hardware, folders, time estimates
     cd.settings()                                      # every setting, its value and meaning
     cd.set_defaults(updates=5000)                      # change a default for this project
-    cd.models()                                        # pretrained and own models
-    cd.predict("images/", model="sbem-mitochondria")   # segment
+    cd.models(target="mitochondria")                   # the CDeep3M model zoo and own models
+    cd.suggest_models(11923, target="mitochondria")    # which model fits these data (CIL record or folder)
+    cd.predict("images/", model="sbem-mitochondria")   # segment; model by name or CIL ID (50689)
+    cd.predict(11923, model=50681)                     # images straight from a Cell Image Library record
     cd.prepare_training("train/images", "train/labels", name="mito")
     cd.train("sbem-mitochondria", "mito", name="mito-ft")             # shows the plan only
     cd.train("sbem-mitochondria", "mito", name="mito-ft", start=True) # starts in the background
@@ -27,28 +29,52 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tarfile
 import time
 import urllib.request
 
 import numpy as np
 
-LIB_VERSION = 7
+LIB_VERSION = 9
 CDEEP3M2 = os.environ.get("CDEEP3M2", "/opt/cdeep3m2")
 ANYWHERE = os.environ.get("CDEEP3M_ANYWHERE", "/opt/cdeep3m-anywhere")
 FRAMES = ("1fm", "3fm", "5fm")
 IMAGE_EXT = (".png", ".tif", ".tiff")
 
-# Pretrained models from the CDeep3M model zoo (https://cdeep3m.crbs.ucsd.edu/home/pre_trained_models).
-ZOO = {
-    "sbem-mitochondria": {
-        "title": "SBEM and ssTEM mitochondria",
-        "about": "Mitochondria in serial block-face SEM and serial-section TEM images",
-        "url": "https://cildata.crbs.ucsd.edu/media/model_display/50681/SBEM_Mitochondria.tar",
-        "doi": "10.7295/W9CDEEP3M50681",
-        "size": "653 MB",
-    },
-}
+# Pretrained models: the CDeep3M model zoo (https://cdeep3m.crbs.ucsd.edu/home/pre_trained_models), as a
+# catalog shipped with this skill (cdeep3m_models.json, built by tools/build_model_catalog.py). Each
+# model is known by a short name and by its CIL model ID.
+def _load_zoo():
+    try:
+        doc = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cdeep3m_models.json")))
+        return {m["name"]: m for m in doc["models"]}
+    except (OSError, ValueError, KeyError):
+        return {"sbem-mitochondria": {
+            "id": 50681, "name": "sbem-mitochondria", "title": "SBEM and ssTEM Mitochondria", "target": "mitochondria",
+            "about": "Mitochondria in serial block-face SEM and serial-section TEM images", "imaging": "SBEM, TEM",
+            "pixel_nm": 4.8, "slice_nm": 70, "doi": "10.7295/W9CDEEP3M50681", "bytes": 684759040,
+            "url": "https://cildata.crbs.ucsd.edu/media/model_display/50681/SBEM_Mitochondria.tar",
+            "networks": ["1fm", "3fm", "5fm"], "test_entry": False}}
+
+
+ZOO = _load_zoo()
+
+
+def _model_key(x):
+    """A model's name from its name, its CIL model ID (50689, "50689", "CIL_50689") or an earlier result."""
+    if isinstance(x, dict):
+        x = x.get("model") or x.get("name")
+    if x is None:
+        return None
+    m = re.fullmatch(r"\s*(?:CIL[_: ]?|CDEEP3M)?(\d+)\s*", str(x), re.IGNORECASE)
+    if m:
+        for k, z in ZOO.items():
+            if z.get("id") == int(m.group(1)):
+                return k
+        raise ValueError("no model with CIL ID %s in the model zoo; models() lists them" % m.group(1))
+    return str(x)
+
 
 # Every setting: default and meaning. Functions take any of them as keyword arguments;
 # set_defaults() changes them for the whole project.
@@ -59,7 +85,8 @@ SETTINGS = {
                     "1 = all (best quality), 2, 4, 10 = one copy (fastest)"),
     "device": ("auto", "auto (the GPU when there is one), gpu or cpu"),
     "precision": ("auto", "Prediction on the CPU: auto (int8 when the model has an int8 version), fp32 or int8"),
-    "threshold": (0.5, "Probability above which a pixel counts as the object, for masks and scores"),
+    "threshold": (0.5, "Probability above which a pixel counts as the object, for masks and scores: 0 to 1, "
+                       "or on CDeep3M's 0-255 image scale (128 = 0.5)"),
     "updates": (3000, "Training: number of updates"),
     "learning_rate": (0.001, "Training: starting learning rate (0.001 for fine-tuning a model; "
                              "0.01 when training from scratch)"),
@@ -160,6 +187,10 @@ def _effective(overrides):
     if s["threads"] in (None, "", 0):
         s["threads"] = cpu_count()
     s["frames"] = _frames(s["frames"])
+    t = float(s["threshold"])
+    if not 0 <= t <= 255:
+        raise ValueError("threshold must be 0 to 1, or 0 to 255 on the image scale")
+    s["threshold"] = round(t / 255, 4) if t > 1 else t
     if int(s["augspeed"]) not in (1, 2, 4, 10):
         raise ValueError("augspeed must be 1, 2, 4 or 10")
     if s["device"] not in ("auto", "gpu", "cpu"):
@@ -320,29 +351,143 @@ def _tail(path, n=15):
 
 
 # ----------------------------------------------------------------------------- models
-def models():
-    """List pretrained models and the project's own trained models."""
+def _mb(n):
+    return "%.0f MB" % (n / 1e6) if n else "?"
+
+
+def _targets(z, target):
+    """True when a model segments the target; matched on the word's first letters, so "mitochondrion",
+    "mitochondria", "membrane" and "membranes" all match."""
+    if not target:
+        return True
+    return any(w[:6] in z["target"] for w in re.findall(r"[a-z]+", str(target).lower()) if len(w) > 2)
+
+
+def models(target=None, imaging=None, include_tests=False):
+    """List the pretrained models of the CDeep3M model zoo (optionally only those for a target such as
+    "mitochondria" or "membranes", or an imaging method such as "SBEM") and the project's own models."""
+    zoo = [z for z in ZOO.values() if (include_tests or not z.get("test_entry"))
+           and _targets(z, target)
+           and (not imaging or str(imaging).lower() in z["imaging"].lower())]
     print("## Models\n")
-    print("| Model | What it segments | Source | Available here |\n|---|---|---|---|")
-    for k, z in ZOO.items():
-        here = os.path.isdir(os.path.join(_zoo_dir(), k, "1fm"))
-        print("| %s | %s | model zoo, DOI %s (%s) | %s |" % (k, z["about"], z["doi"], z["size"],
-                                                           "yes" if here else "downloaded on first use"))
+    print("Pretrained models from the CDeep3M model zoo, by name or CIL model ID. Each was trained on images "
+          "of one pixel size; images at a similar size segment best.\n")
+    print("| Model | CIL ID | Segments | Imaging | Pixel size (X/Y, Z) | Networks | Size | Downloaded |")
+    print("|---|---|---|---|---|---|---|---|")
+    for z in zoo:
+        px = "%g nm, %s" % (z["pixel_nm"], "%g nm" % z["slice_nm"] if z.get("slice_nm") else "Z not stated") \
+            if z.get("pixel_nm") else "not stated"
+        here = os.path.isdir(os.path.join(_zoo_dir(), z["name"], "1fm"))
+        print("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            z["name"], z["id"], z["about"], z["imaging"], px, ", ".join(z.get("networks") or []) or "?",
+            _mb(z.get("bytes")), "yes" if here else "no (on first use)"))
     own = []
     for d in sorted(glob.glob(os.path.join(_models_dir(), "*"))):
         name = os.path.basename(d)
-        if name in ZOO:
+        if name in ZOO or not os.path.isdir(d):
             continue
         info = {}
         try:
             info = json.load(open(os.path.join(d, "source.json")))
         except (OSError, ValueError):
             pass
-        frames = [f for f in FRAMES if os.path.isdir(os.path.join(d, f))]
         own.append(name)
-        print("| %s | trained here from %s (%s updates) | `%s` | yes (%s) |" % (
-            name, info.get("base_model", "?"), info.get("updates", "?"), d, ", ".join(frames)))
-    return {"pretrained": list(ZOO), "own": own}
+        if len(own) == 1:
+            print("\n**Trained in this project**\n\n| Model | Trained from | Updates | Networks | Folder |\n|---|---|---|---|---|")
+        frames = [f for f in FRAMES if os.path.isdir(os.path.join(d, f))]
+        print("| %s | %s | %s | %s | `%s` |" % (name, info.get("base_model", "?"), info.get("updates", "?"),
+                                               ", ".join(frames), d))
+    print("\nCite the model zoo as: Haberl et al., Nat Methods 15, 677-680 (2018), doi:10.1038/s41592-018-0106-z.")
+    return {"pretrained": [z["name"] for z in zoo], "own": own}
+
+
+_IMAGING = {"SBEM": ("scanning electron", "sem", "block"), "TEM": ("transmission electron", "tem", "electron; film"),
+            "electron tomography": ("tomograph",)}
+
+
+def _fit(z, pixel_nm=None, imaging=None):
+    """How well a pretrained model suits data of this pixel size and imaging: (rating, note)."""
+    notes, rating = [], "unknown"
+    if pixel_nm and z.get("pixel_nm"):
+        r = float(pixel_nm) / z["pixel_nm"]
+        rating = "good" if 1 / 1.5 <= r <= 1.5 else "fair" if 1 / 2.5 <= r <= 2.5 else "poor"
+        notes.append("pixels %g nm vs the model's %g nm (%s)" % (
+            pixel_nm, z["pixel_nm"], "similar" if rating == "good" else
+            "the images are %.1f× %s" % (max(r, 1 / r), "coarser" if r > 1 else "finer")))
+    elif z.get("pixel_nm"):
+        notes.append("pixel size of the images not known; the model's is %g nm" % z["pixel_nm"])
+    if imaging:
+        im = imaging.lower()
+        keys = [k for k, words in _IMAGING.items() if any(w in im for w in words)]
+        if keys:
+            same = any(k.lower() in z["imaging"].lower() for k in keys)
+            notes.append("imaging %s the model's (%s)" % ("matches" if same else "differs from", z["imaging"]))
+            if not same and rating == "good":
+                rating = "fair"
+        elif "electron" in im:
+            notes.append("electron microscopy, type not stated")
+        else:
+            notes.append("not electron microscopy (the models are trained on EM)")
+            rating = "poor"
+    return rating, "; ".join(notes)
+
+
+def _data_info(images):
+    """(pixel_nm, imaging, label) of the data: from a CIL record's catalog entry, else unknown."""
+    if isinstance(images, dict) and images.get("folder"):          # what cil.slices() returned
+        if images.get("id") is not None:
+            return (images.get("pixel_nm") or [None])[0], images.get("imaging"), "CIL_%s" % images["id"]
+        return None, None, images["folder"]
+    if _is_cil(images):
+        try:
+            r = _cil()._record_or_fail(images)
+            return r.get("pixel_nm_x"), r.get("imaging_mode"), "CIL_%d" % r["id"]
+        except LookupError:
+            return None, None, str(images)
+    return None, None, str(images)
+
+
+def suggest_models(images=None, target=None, pixel_nm=None, imaging=None):
+    """Rank the pretrained models for some data: a CIL record ID (its pixel size and imaging are read from
+    the catalog) or a folder, with pixel_nm and imaging given when known. target: e.g. "mitochondria"."""
+    px, im, label = _data_info(images) if images is not None else (None, None, "the images")
+    px, im = pixel_nm or px, imaging or im
+    zoo = [z for z in ZOO.values() if not z.get("test_entry")
+           and _targets(z, target)]
+    order = {"good": 0, "fair": 1, "unknown": 2, "poor": 3}
+    ranked = sorted(((z,) + _fit(z, px, im) for z in zoo),
+                    key=lambda t: (order[t[1]], abs((px or t[0].get("pixel_nm") or 1) - (t[0].get("pixel_nm") or 0))))
+    print("## Models for %s\n" % label)
+    print("Data: pixel size %s, imaging %s%s.\n" % ("%g nm" % px if px else "not known", im or "not stated",
+                                                    ", as recorded in the CIL catalog" if _is_cil(images) else ""))
+    print("| Model | CIL ID | Segments | Fit | Why |\n|---|---|---|---|---|")
+    for z, rating, note in ranked:
+        print("| %s | %s | %s | %s | %s |" % (z["name"], z["id"], z["about"], rating, note))
+    print("\nCDeep3M models work best on images at the pixel size they were trained on; a poor fit can "
+          "still be tested on a few images and scored, or improved by fine-tuning.")
+    return {"data": label, "pixel_nm": px, "imaging": im,
+            "models": [{"model": z["name"], "id": z["id"], "fit": r, "why": n} for z, r, n in ranked]}
+
+
+def _is_cil(x):
+    if isinstance(x, dict):
+        return "id" in x and "folder" not in x
+    if isinstance(x, int):
+        return True
+    return isinstance(x, str) and not os.path.exists(x) and bool(re.fullmatch(r"\s*(?:CIL[_: ]?)?\d+\s*", x, re.I))
+
+
+def _cil():
+    """The cil skill's library (the Cell Image Library), installed next to this skill."""
+    try:
+        import cil_lib
+    except ImportError:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for d in (os.path.join(os.path.dirname(here), "cil"), os.path.expanduser("~/.deepagents/agent/skills/cil")):
+            if os.path.isfile(os.path.join(d, "cil_lib.py")) and d not in sys.path:
+                sys.path.insert(0, d)
+        import cil_lib
+    return cil_lib
 
 
 def _caffemodel(frame_dir):
@@ -356,17 +501,24 @@ def _caffemodel(frame_dir):
 def get_model(name, frames=None, calibration_images=None):
     """Make a model ready for prediction: download a pretrained one if needed, convert to ncnn.
     calibration_images: a folder of training images to also build an int8 version (faster on the CPU)."""
+    name = _model_key(name)
     d = _model_path(name)
     fl = _frames(frames or "1fm")
     log = os.path.join(_scratch(), "get_model.log")
+    if name in ZOO and ZOO[name].get("networks"):
+        missing = [f for f in fl if f not in ZOO[name]["networks"]]
+        if missing:
+            raise ValueError("model %s has only the %s network(s), not %s" % (
+                name, ", ".join(ZOO[name]["networks"]), ", ".join(missing)))
     if not os.path.isfile(os.path.join(d, "1fm", "deploy.prototxt")):
         if name not in ZOO:
-            raise FileNotFoundError("unknown model %r; pretrained models: %s" % (name, ", ".join(ZOO)))
+            raise FileNotFoundError("unknown model %r; models() lists the pretrained and own models" % name)
         z = ZOO[name]
         tmp = os.path.join(_scratch(), "download_" + name)
         shutil.rmtree(tmp, ignore_errors=True)
         os.makedirs(tmp)
-        print("Downloading %s (%s) from the CDeep3M model zoo ..." % (z["title"], z["size"]), flush=True)
+        print("Downloading %s (CIL %s, %s) from the CDeep3M model zoo ..." % (z["title"], z["id"], _mb(z.get("bytes"))),
+              flush=True)
         t0 = time.time()
         urllib.request.urlretrieve(z["url"], os.path.join(tmp, "model.tar"))
         with tarfile.open(os.path.join(tmp, "model.tar")) as t:
@@ -377,7 +529,7 @@ def get_model(name, frames=None, calibration_images=None):
         shutil.rmtree(d, ignore_errors=True)
         shutil.move(os.path.dirname(os.path.dirname(hits[0])), d)
         shutil.rmtree(tmp, ignore_errors=True)
-        json.dump({"source": "model zoo", "title": z["title"], "doi": z["doi"], "url": z["url"]},
+        json.dump({"source": "model zoo", "id": z["id"], "title": z["title"], "doi": z["doi"], "url": z["url"]},
                   open(os.path.join(d, "source.json"), "w"), indent=1)
         print("Downloaded in %s." % _fmt_time(time.time() - t0), flush=True)
     done = []
@@ -413,15 +565,26 @@ def _stamp():
 
 def predict(images, model="sbem-mitochondria", name=None, **overrides):
     """Segment the images in a folder (or one image). Settings: frames, augspeed, device, precision, threshold."""
-    model = _name(model)
+    model = _model_key(model)
     s = _effective(overrides)
+    px, imaging, source = _data_info(images)
+    if isinstance(images, dict) and images.get("folder"):
+        images = images["folder"]
+    elif _is_cil(images):
+        got = _cil().slices(images)
+        if not got.get("ready"):
+            return {"name": None, "ready": False, "reason": "the record's images are large; confirm the download first"}
+        images = got["folder"]
     files = _check_folder(images, "prediction")
     name = name or "%s_%s" % (model, _stamp())
     gpu = _gpu()
     print("## Prediction: %s\n" % name)
     print("**Settings used**\n")
-    print(_settings_table(dict(s, model=model, images=images), ["model", "images", "frames", "augspeed",
-                                                                 "device", "precision", "threshold"]))
+    print(_settings_table(dict(s, model=model, images=source if source != str(images) else images),
+                          ["model", "images", "frames", "augspeed", "device", "precision", "threshold"]))
+    if model in ZOO and (px or imaging):
+        rating, note = _fit(ZOO[model], px, imaging)
+        print("\nModel fit for these images: **%s** (%s)." % (rating, note))
     print(flush=True)
     get_model(model, frames=s["frames"])
     work = os.path.join(_scratch(), "predict", name)
@@ -451,7 +614,7 @@ def predict(images, model="sbem-mitochondria", name=None, **overrides):
         shutil.copytree(os.path.join(work, "overlay"), os.path.join(out, "overlay"))
     masks = _write_masks(os.path.join(out, "probability"), os.path.join(out, "mask"), s["threshold"])
     used = re.findall(r"[Rr]unning prediction with ncnn on ([^\n(]+)", _tail(os.path.join(work, "logs", "prediction.log"), 400))
-    meta = {"name": name, "model": model, "images": os.path.abspath(images), "image_files": [os.path.basename(f) for f in files],
+    meta = {"name": name, "model": model, "images": os.path.abspath(images), "source": source, "image_files": [os.path.basename(f) for f in files],
             "settings": {k: s[k] for k in ("frames", "augspeed", "device", "precision", "threshold")},
             "seconds": round(took, 1), "device_used": used[-1].strip() if used else dev, "gpu": gpu}
     json.dump(meta, open(os.path.join(out, "prediction.json"), "w"), indent=1)
@@ -465,6 +628,7 @@ def predict(images, model="sbem-mitochondria", name=None, **overrides):
     print("| Masks (probability > %s) | `%s/mask` |" % (s["threshold"], out))
     print("| Overlays on the images | `%s/overlay` |" % out)
     print("\nPrediction name: `%s`" % name)
+    _saved_line(out)
     return {"name": name, "folder": out, "probability": probs, "masks": masks, "seconds": took}
 
 
@@ -750,7 +914,7 @@ def train(model, training_data, name=None, start=False, **overrides):
     """Fine-tune a model (or train from scratch with model=None) in the background.
     Without start=True it only shows the plan. Settings: frames, updates, learning_rate, iter_size, batch,
     device, threads, checkpoint_every. Running it again with the same name continues a stopped run."""
-    model = _name(model)
+    model = _model_key(model)
     from_scratch = model is None
     if from_scratch and "learning_rate" not in overrides and "learning_rate" not in _saved():
         overrides["learning_rate"] = 0.01
@@ -891,6 +1055,131 @@ def stop_training(name):
     return training_status(name, plot=False)
 
 
+# ----------------------------------------------------------------------------- storage
+# What the project keeps (persistent, counted against the storage quota) and what sits in the
+# temporary folder. Each entry: (kind, label, root folder, kept).
+def _areas():
+    return [("model", "trained model", _models_dir(), True),
+            ("prediction", "prediction", os.path.join(_workspace(), "predictions"), True),
+            ("pretrained", "downloaded pretrained model", _zoo_dir(), False),
+            ("run", "training run", os.path.join(_scratch(), "runs"), False),
+            ("training_data", "training data", os.path.join(_scratch(), "training_data"), False)]
+
+
+def _du(path):
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    n = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            try:
+                n += os.lstat(os.path.join(root, f)).st_size
+            except OSError:
+                pass
+    return n
+
+
+def _size(n):
+    return "%.1f GB" % (n / 1e9) if n >= 1e9 else "%.0f MB" % (n / 1e6) if n >= 1e6 else "%.0f KB" % (n / 1e3)
+
+
+def _items():
+    out = []
+    for kind, label, root, kept in _areas():
+        for d in sorted(glob.glob(os.path.join(root, "*"))):
+            if os.path.isdir(d):
+                out.append({"kind": kind, "label": label, "name": os.path.basename(d), "path": d, "kept": kept,
+                            "bytes": _du(d), "date": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(d)))})
+    return out
+
+
+def _saved_line(path):
+    """One line after something was written to the project folder: its size and the folder's total."""
+    print("\nSaved to persistent storage: %s; this project's CDeep3M folder now holds %s (%.1f GB free). "
+          "To see or free space: ask what CDeep3M is storing." % (_size(_du(path)), _size(_du(_workspace())),
+                                                                 _free_gb(_workspace())))
+
+
+def storage():
+    """What CDeep3M keeps for this project and what is in the temporary folder, with sizes."""
+    items = _items()
+    ws = _workspace()
+    print("## CDeep3M storage\n")
+    print("**Kept** in `%s` (persistent storage: survives pod restarts, counts against the quota): **%s**, "
+          "%.1f GB free.\n" % (ws, _size(_du(ws)), _free_gb(ws)))
+    kept = sorted([i for i in items if i["kept"]], key=lambda i: -i["bytes"])
+    if kept:
+        print("| What | Name | Size | Last changed |\n|---|---|---|---|")
+        for i in kept:
+            print("| %s | %s | %s | %s |" % (i["label"], i["name"], _size(i["bytes"]), i["date"]))
+    else:
+        print("Nothing yet: no trained models or predictions.")
+    sc = _scratch()
+    tmp = sorted([i for i in items if not i["kept"]], key=lambda i: -i["bytes"])
+    print("\n**Temporary** in `%s` (lost when the pod stops; pretrained models download again on use): "
+          "**%s**, %.1f GB free.\n" % (sc, _size(_du(sc)), _free_gb(sc)))
+    if tmp:
+        print("| What | Name | Size | Last changed |\n|---|---|---|---|")
+        for i in tmp:
+            print("| %s | %s | %s | %s |" % (i["label"], i["name"], _size(i["bytes"]), i["date"]))
+    else:
+        print("Empty.")
+    print("\nAnything listed can be deleted by name; nothing is deleted without the user's confirmation.")
+    return {"kept_bytes": _du(ws), "temporary_bytes": _du(sc), "items": items}
+
+
+def delete(names, kind=None, confirm=False):
+    """Delete trained models, predictions, downloaded pretrained models, training runs or training data
+    by name. Without confirm=True it only shows what would be deleted and its size."""
+    names = [_name(n) for n in (names if isinstance(names, (list, tuple)) else [names])]
+    items = _items()
+    found, problems = [], []
+    for n in names:
+        hit = [i for i in items if i["name"] == str(n) and (kind is None or i["kind"] == kind)]
+        if not hit:
+            problems.append("`%s`: not found%s (the storage report lists what there is)" % (n, " as a %s" % kind if kind else ""))
+        elif len(hit) > 1:
+            problems.append("`%s` is both %s; say which (kind=%s)" % (
+                n, " and ".join("a " + h["label"] for h in hit), " or ".join('"%s"' % h["kind"] for h in hit)))
+        else:
+            found.append(hit[0])
+    for i in found:
+        if i["kind"] == "run":
+            try:
+                pid = json.load(open(os.path.join(i["path"], "run.json"))).get("pid")
+            except (OSError, ValueError):
+                pid = None
+            if _alive(pid):
+                problems.append("`%s` is still training; stop it first" % i["name"])
+                found.remove(i)
+    print("## Delete\n")
+    if found:
+        print("| What | Name | Size | Where |\n|---|---|---|---|")
+        for i in found:
+            print("| %s | %s | %s | %s |" % (i["label"], i["name"], _size(i["bytes"]),
+                                           "persistent storage" if i["kept"] else "temporary folder"))
+    for p in problems:
+        print("\n- " + p)
+    total = sum(i["bytes"] for i in found)
+    if found and not confirm:
+        print("\nNothing has been deleted. This frees %s; it happens only when the user confirms." % _size(total))
+        return {"deleted": [], "would_delete": [i["name"] for i in found], "bytes": total}
+    done = []
+    for i in found:
+        roots = [os.path.realpath(r) for _, _, r, _ in _areas()]
+        real = os.path.realpath(i["path"])
+        if os.path.dirname(real) not in roots:          # only a direct entry of a CDeep3M folder
+            print("\n- `%s`: not inside a CDeep3M folder, left alone" % i["name"])
+            continue
+        shutil.rmtree(real)
+        done.append(i["name"])
+    if done:
+        print("\nDeleted %d item%s, %s freed. Persistent storage now holds %s (%.1f GB free)." % (
+            len(done), "" if len(done) == 1 else "s", _size(sum(i["bytes"] for i in found if i["name"] in done)),
+            _size(_du(_workspace())), _free_gb(_workspace())))
+    return {"deleted": done, "bytes": sum(i["bytes"] for i in found if i["name"] in done)}
+
+
 def finish_training(name, model_name=None):
     """Turn a training run into a model for predict(): export, re-estimate BatchNorm, convert to ncnn."""
     name = _name(name)
@@ -934,4 +1223,5 @@ def finish_training(name, model_name=None):
                "run": name, "updates": info["settings"]["updates"], "settings": info["settings"],
                "made": time.strftime("%Y-%m-%d %H:%M:%S")}, open(os.path.join(md, "source.json"), "w"), indent=1)
     print("\nNew model `%s` (networks: %s) saved in `%s`; it can now segment images." % (model_name, ", ".join(done), md))
+    _saved_line(md)
     return {"model": model_name, "folder": md, "frames": done}

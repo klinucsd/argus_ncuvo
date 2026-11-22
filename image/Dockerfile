@@ -3,7 +3,7 @@
 # =============================================================================
 # An ARGUS release image with Willy's CDeep3M-anywhere (EM image segmentation:
 # ncnn prediction on CPU or Vulkan GPU, PyTorch training) added on top, as
-# ARGUS-FEDER adds TokSearch, plus the cdeep3m skill. Built from the REPOSITORY ROOT:
+# ARGUS-FEDER adds TokSearch, plus the cdeep3m and cil skills. Built from the REPOSITORY ROOT:
 #
 #   docker build -f image/Dockerfile -t kaiucsd/argus-ncuvo:<version>-cpu .
 #   docker build -f image/Dockerfile -t kaiucsd/argus-ncuvo:<version>-cu118 \
@@ -16,7 +16,7 @@
 # ARGUS_IMAGE can also be quay.io/jupyter/base-notebook:latest, for CDeep3M without ARGUS.
 # =============================================================================
 
-ARG ARGUS_IMAGE=kaiucsd/argus-dev:v1.5.11-rc3
+ARG ARGUS_IMAGE=kaiucsd/argus-dev:v1.5.11-rc6
 
 # ---------- stage 1: ncnn tools, CDeep3M2 and CDeep3M-anywhere sources, caffe.proto ----------
 FROM ubuntu:24.04 AS builder
@@ -76,8 +76,10 @@ COPY --from=builder /opt/cdeep3m2 /opt/cdeep3m2
 COPY --from=builder /opt/cdeep3m-anywhere /opt/cdeep3m-anywhere
 COPY --from=builder /opt/caffe.proto /opt/caffe.proto
 COPY image/pod_test.sh /opt/argus-ncuvo/pod_test.sh
-# The skill, where ARGUS looks for skills (as its core skills are installed)
+# The skills, where ARGUS looks for skills (as its core skills are installed): cdeep3m (segmentation)
+# and cil (the Cell Image Library: catalog, search, downloads), which cdeep3m uses for CIL records.
 COPY --chown=${NB_UID}:${NB_GID} skills/cdeep3m /home/${NB_USER}/.deepagents/agent/skills/cdeep3m
+COPY --chown=${NB_UID}:${NB_GID} skills/cil /home/${NB_USER}/.deepagents/agent/skills/cil
 # As in Willy's Dockerfile: patch CDeep3M2, make its scripts executable and run them with the
 # environment's python. chmod only these folders: /opt also holds conda.
 RUN cd /opt/cdeep3m2 \
@@ -91,7 +93,7 @@ RUN cd /opt/cdeep3m2 \
 ENV CDEEP3M2=/opt/cdeep3m2 \
     NCNN_BUILD=/opt/ncnn_build \
     CAFFE_PROTO=/opt/caffe.proto \
-    PYTHONPATH=/opt/cdeep3m-anywhere:/home/jovyan/.deepagents/agent/skills/cdeep3m \
+    PYTHONPATH=/opt/cdeep3m-anywhere:/home/jovyan/.deepagents/agent/skills/cdeep3m:/home/jovyan/.deepagents/agent/skills/cil \
     PATH=/opt/argus-ncuvo:/opt/cdeep3m2:/opt/cdeep3m-anywhere/ncnn:/opt/cdeep3m-anywhere/tools:/opt/cdeep3m-anywhere/singularity:$PATH \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=all

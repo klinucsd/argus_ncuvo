@@ -1,6 +1,6 @@
 ---
 name: cdeep3m
-description: Segment electron, light or X-ray microscopy images with CDeep3M deep learning — mitochondria, membranes, nuclei, vesicles. Predict with pretrained or own models, fine-tune or train on labelled slices (GPU or CPU, in the background), track training, evaluate against expert labels (Dice, IoU), show segmentations. Settings such as updates, learning rate, networks and speed can be changed per run or per project.
+description: Segment electron microscopy images with CDeep3M deep learning — mitochondria, membranes, synapses, synaptic vesicles. 13 pretrained models from the CDeep3M model zoo (by name or CIL model ID), which model fits which data (pixel size, imaging), images from a folder or a Cell Image Library record; fine-tune or train on labelled slices (GPU or CPU, in the background), track training, evaluate against expert labels (Dice, IoU), compare, show segmentations. Settings such as networks, speed, threshold and learning rate can be changed per run or per project. See storage use, delete saved models and predictions.
 ---
 
 # CDeep3M segmentation
@@ -35,7 +35,8 @@ Use the user's words for files and folders; when they give none, the sample data
 |---|---|
 | know what hardware, folders and speed to expect | `cd.environment()` |
 | see or change settings | `cd.settings()`; for this request only pass them as arguments; for the whole project `cd.set_defaults(updates=..., ...)` |
-| know which models exist | `cd.models()` |
+| know which models exist | `cd.models(target=..., imaging=...)` (both optional) |
+| know which model suits some images | `cd.suggest_models(images, target=..., pixel_nm=..., imaging=...)` |
 | try the sample data | `cd.sample_data()` |
 | segment images | `cd.predict(images, model=..., name=...)` |
 | score a segmentation against expert labels | `cd.evaluate(prediction, labels)` |
@@ -46,9 +47,13 @@ Use the user's words for files and folders; when they give none, the sample data
 | follow training | `cd.training_status(name)` → embed the loss curve |
 | stop / continue training | `cd.stop_training(name)` / `cd.train(model, training_data, name=..., start=True)` |
 | use the trained network | `cd.finish_training(name, model_name=...)`, then `cd.predict(images, model=model_name)` |
+| see what CDeep3M is storing and how much space it takes | `cd.storage()` |
+| delete trained models, predictions, downloaded models, training runs or training data | `cd.delete(names)` (a name or a list; `kind=...` only when the report asks) |
 
 Wherever a function takes a prediction, training data, run or model, pass either its name or what the
-earlier function returned. `model=None` in `train` trains from scratch (learning rate 0.01 unless the user sets one);
+earlier function returned. A pretrained model can also be given by its CIL model ID (e.g. `50689`).
+`images` can be a folder, one image, or a Cell Image Library record ID (e.g. `11923`), whose images are
+fetched for you; to find records, use the `cil` skill. `model=None` in `train` trains from scratch (learning rate 0.01 unless the user sets one);
 otherwise it fine-tunes the given model, the usual and much faster way.
 
 ## Rules
@@ -63,8 +68,13 @@ otherwise it fine-tunes the given model, the usual and much faster way.
    asks to change something, pass the matching setting; if nothing matches, say so.
 4. **Pairing for scores:** `evaluate` and `show` pair predictions and labels in sorted file order.
    Make sure the label folder holds the labels of the same images, in the same order.
-5. Pretrained models, training data and training runs live in the temporary folder `/tmp/cdeep3m`
+5. **Model fit:** pretrained models are trained on one pixel size. When the pixel size of the images is
+   known (a CIL record, or the user says it), the report states the fit; pass it on to the user.
+6. Pretrained models, training data and training runs live in the temporary folder `/tmp/cdeep3m`
    (large; lost when the pod stops). Own trained models (from `finish_training`), predictions and
    settings are kept in the project folder `cdeep3m/` next to the notebook. When a pod restart has
    cleared a run, prepare the data and start it again.
    Embed figures with the path the function prints.
+7. **Deleting needs the user's go-ahead.** `delete` without `confirm=True` shows what would be deleted
+   and its size, and deletes nothing. Delete only after the user agrees, in a later request, with
+   `confirm=True` and the same names. Delete only through `delete`, never with shell commands.
